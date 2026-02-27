@@ -1,28 +1,19 @@
-FROM python:3.10-slim
+FROM huggingface/transformers-pytorch:latest
 
-# Install necessary system dependencies for Ollama and TTS
-RUN apt-get update && apt-get install -y curl bash zstd
+# Install system utilities needed for Ollama
+RUN apt-get update && apt-get install -y curl wget ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama Service
+# Install Ollama (binary) – works on CPU only
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
-# Set up user and permissions for Hugging Face Spaces environment
-# HF Spaces run as a specialized user for security purposes
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH
-
-WORKDIR $HOME/app
-
-# Copy all the folder files into the HF Space container
-COPY --chown=user . $HOME/app
-
-# Ensure start script has executable permissions
-RUN chmod +x $HOME/app/start_hf.sh
-
-# Install Python requirements
+# Install Python dependencies
+COPY requirements.txt /app/requirements.txt
+WORKDIR /app
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Start the boot sequence script
-CMD ["bash", "start_hf.sh"]
+# Copy source code (app.py, static/, templates/, etc.)
+COPY . /app
+
+# Make the start script executable and set entrypoint
+RUN chmod +x start.sh
+ENTRYPOINT ["./start.sh"]

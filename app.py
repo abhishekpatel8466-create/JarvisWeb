@@ -8,8 +8,10 @@ import json
 import requests
 import re
 from bs4 import BeautifulSoup
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 if not os.path.exists("static"):
     os.makedirs("static")
@@ -139,13 +141,33 @@ def home():
 def chat():
     global chat_history
     
+    # Check if running in a Replit environment and forward headers
+    if 'REPL_ID' in os.environ:
+        # Replit uses X-Forwarded-For for client IP
+        # And X-Forwarded-Proto for scheme (http/https)
+        if 'X-Forwarded-For' in request.headers:
+            request.remote_addr = request.headers['X-Forwarded-For'].split(',')[0].strip()
+        if 'X-Forwarded-Proto' in request.headers:
+            request.url_root = request.headers['X-Forwarded-Proto'] + '://' + request.host + '/'
+
+    # External backend forwarding – if EXTERNAL_API_URL env var is set, proxy the request
+    external_url = os.getenv('EXTERNAL_API_URL')
+    if external_url:
+        try:
+            resp = requests.post(f"{external_url}/chat", json=request.json, timeout=30)
+            # Assume external service returns same JSON structure {"answer":..., "audio":...}
+            return jsonify(resp.json()), resp.status_code
+        except Exception as e:
+            print(f"Error forwarding to external API: {e}")
+            # Fall back to local processing if forwarding fails
+    
     data = request.json
     question = data.get('question', '')
     voice = data.get('voice', 'en-IN-PrabhatNeural')
     mode = data.get('mode', 'mentor')
     use_internet = data.get('useInternet', True)
     history_mode = data.get('historyMode', 'keep')
-
+    
     # If the user selected "Start Fresh", wipe the memory before processing the question
     if history_mode == "clear":
         chat_history.clear()

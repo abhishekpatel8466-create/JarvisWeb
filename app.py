@@ -150,17 +150,6 @@ def chat():
         if 'X-Forwarded-Proto' in request.headers:
             request.url_root = request.headers['X-Forwarded-Proto'] + '://' + request.host + '/'
 
-    # External backend forwarding – if EXTERNAL_API_URL env var is set, proxy the request
-    external_url = os.getenv('EXTERNAL_API_URL')
-    if external_url:
-        try:
-            resp = requests.post(f"{external_url}/chat", json=request.json, timeout=30)
-            # Assume external service returns same JSON structure {"answer":..., "audio":...}
-            return jsonify(resp.json()), resp.status_code
-        except Exception as e:
-            print(f"Error forwarding to external API: {e}")
-            # Fall back to local processing if forwarding fails
-    
     data = request.json
     question = data.get('question', '')
     voice = data.get('voice', 'en-IN-PrabhatNeural')

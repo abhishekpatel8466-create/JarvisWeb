@@ -1,4 +1,4 @@
-FROM gemma2:2b
+FROM gemma2:2b-q4_k_m
 
 # --- HIGH-SPEED OPTIMIZATION ---
 PARAMETER temperature 0.4

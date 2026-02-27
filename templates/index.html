@@ -753,8 +753,7 @@
         </div>
 
         <div class="chat-box" id="chatBox">
-            <div class="message ai-msg">Namaste! I am Jarvis, your personal AI Mentor. Feel free to ask me anything or
-                hit the Microphone to talk!</div>
+            <div class="message ai-msg">Hello! I am Jarvis, your professional AI Mentor and Career Coach. How can I help you today?</div>
         </div>
 
         <div class="controls">
@@ -845,6 +844,8 @@
             statusSubtext.innerText = 'Update your browser to use voice.';
         }
 
+        let currentAbortController = null;
+
         liveToggle.addEventListener('change', (e) => {
             if (e.target.checked && !isWaitingForResponse) {
                 try { recognition.start(); } catch (err) { }
@@ -867,9 +868,20 @@
         }
 
         stopBtn.addEventListener('click', () => {
-            // Stop the audio instantly
+            // 1. Stop Speech Synthesis (Browser Voice)
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+            }
+
+            // 2. Stop Audio Player (HD Cloud Voice)
             audioPlayer.pause();
             audioPlayer.currentTime = 0;
+
+            // 3. Cancel any ongoing Fetch request (Thinking phase)
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
 
             // Force the system back to listening mode
             isWaitingForResponse = false;
@@ -966,11 +978,6 @@
             resizerLeft.style.display = 'none';
         });
 
-        closeLeftBtn.addEventListener('click', () => {
-            sidebarLeftElem.style.display = 'none';
-            resizerLeft.style.display = 'none';
-        });
-
 
 
 
@@ -1015,9 +1022,8 @@
             addMessage(question, true);
             textInput.value = '';
 
-            micBtn.classList.remove('recording');
-            statusBox.classList.remove('active');
-            statusBox.classList.add('speaking');
+            micBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
             micText.innerText = 'Thinking...';
             statusSubtext.innerText = 'Jarvis is computing an answer...';
             document.getElementById('indicatorDot').style.backgroundColor = 'var(--text-main)';
@@ -1030,11 +1036,15 @@
             const useInternet = document.getElementById('internetToggle').checked;
             const historyMode = document.getElementById('historySelect').value;
 
+            currentAbortController = new AbortController();
+            const signal = currentAbortController.signal;
+
             try {
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question, voice, mode, useInternet, historyMode })
+                    body: JSON.stringify({ question, voice, mode, useInternet, historyMode }),
+                    signal: signal
                 });
 
                 const data = await response.json();
@@ -1067,9 +1077,15 @@
                     audioPlayer.dispatchEvent(new Event('ended'));
                 }
             } catch (e) {
+                if (e.name === 'AbortError') {
+                    console.log('User cancelled request');
+                    return;
+                }
                 chatBox.removeChild(typingDiv);
                 addMessage("Warning: Cannot connect to Python backend.", false);
                 audioPlayer.dispatchEvent(new Event('ended'));
+            } finally {
+                currentAbortController = null;
             }
         }
 

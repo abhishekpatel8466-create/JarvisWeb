@@ -153,7 +153,7 @@ def chat():
     data = request.json
     question = data.get('question', '')
     voice = data.get('voice', 'en-IN-PrabhatNeural')
-    mode = data.get('mode', 'mentor')
+    mode = data.get('mode', 'casual')
     use_internet = data.get('useInternet', True)
     history_mode = data.get('historyMode', 'keep')
     

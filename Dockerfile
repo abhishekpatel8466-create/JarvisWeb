@@ -1,4 +1,4 @@
-FROM huggingface/transformers-pytorch:latest
+FROM python:3.10-slim
 
 # Install system utilities needed for Ollama
 RUN apt-get update && apt-get install -y curl wget ca-certificates && rm -rf /var/lib/apt/lists/*

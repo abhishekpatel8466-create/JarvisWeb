@@ -1,0 +1,5 @@
+flask
+ollama
+edge-tts
+beautifulsoup4
+requests

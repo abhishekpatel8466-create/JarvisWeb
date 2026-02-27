@@ -2,6 +2,5 @@ flask
 edge-tts
 beautifulsoup4
 requests
-llama-cpp-python==0.2.5
 flask-cors
 groq

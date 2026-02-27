@@ -16,10 +16,10 @@ COPY . .
 
 # Set environment variables for Flask
 ENV FLASK_APP=app.py
-ENV PORT=10000
+ENV PORT=7860
 
-# Expose the default Render port
-EXPOSE 10000
+# Expose the default Hugging Face port
+EXPOSE 7860
 
 # Start the application
 CMD ["python", "app.py"]

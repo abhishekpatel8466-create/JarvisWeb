@@ -13,26 +13,10 @@ from groq import Groq
 app = Flask(__name__)
 CORS(app)
 
-# Load context from a persistent JSON file so Jarvis "remembers" you
-MEMORY_FILE = 'Jarvis_Memory.json'
-
-def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_memory():
-    with open(MEMORY_FILE, 'w') as f:
-        json.dump(chat_history, f)
-
-chat_history = load_memory()
+# Per-session memory (limited size to prevent OOM)
+session_history = {}
 
 def search_the_web(query):
-    # Same search logic as before
     try:
         url = f"https://www.google.com/search?q={query}"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -45,19 +29,21 @@ def search_the_web(query):
         return None
     return None
 
-def text_to_audio(text, voice):
-    # Strip markdown for cleaner audio
-    if not text: return ""
+def text_to_audio(text, voice, file_path):
+    if not text: return
     clean_text = text.replace("**", "").replace("*", "").replace("#", "").replace("`", "")
-    filename = f"audio_{uuid.uuid4().hex}.mp3"
-    file_path = os.path.join("static", filename)
     
     async def generate_speech():
         communicate = edge_tts.Communicate(clean_text, voice)
         await communicate.save(file_path)
     
-    asyncio.run(generate_speech())
-    return filename
+    # Use a new event loop for this thread to avoid issues with the main loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(generate_speech())
+    finally:
+        loop.close()
 
 @app.route('/')
 def home():
@@ -69,79 +55,90 @@ def send_static(path):
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    global chat_history
     data = request.json
     question = data.get('question', '')
     voice = data.get('voice', 'en-IN-PrabhatNeural')
     mode = data.get('mode', 'casual')
     use_internet = data.get('useInternet', True)
     history_mode = data.get('historyMode', 'keep')
+    
+    # Simple session tracking (using IP for now, not perfect but better than global)
+    user_id = request.remote_addr or "guest"
+    if user_id not in session_history or history_mode == "clear":
+        session_history[user_id] = []
 
-    if history_mode == "clear":
-        chat_history = []
-        save_memory()
-
-    needs_internet = any(word in question.lower() for word in ['today', 'current', 'news', 'weather', 'latest', 'price of', 'who won', 'search'])
-    prompt = question
-
-    # Define separate core personas
-    MENTOR_PROMPT = """You are Jarvis, a world-class Senior Software Architect. Professional, concise, FAANG-level insights."""
-    CASUAL_PROMPT = """You are Jarvis, a supportive human friend. Be natural, brief, and cool. No robot talk."""
+    history = session_history[user_id]
+    
+    # Core Personas
+    MENTOR_PROMPT = """You are Jarvis, a Silicon Valley Software Architect. Professional, concise, FAANG-level insights."""
+    CASUAL_PROMPT = """You are Jarvis, a cool human friend. Be natural, brief, and supportive. No academic talk."""
 
     def generate():
-        global chat_history
-        
-        # Determine Persona
+        # Update/Inject System Prompt
         base_prompt = CASUAL_PROMPT if mode == "casual" else MENTOR_PROMPT
-        if not chat_history or chat_history[0].get("role") != "system":
-            chat_history.insert(0, {"role": "system", "content": base_prompt})
+        if not history or history[0].get("role") != "system":
+            history.insert(0, {"role": "system", "content": base_prompt})
         else:
-            chat_history[0]["content"] = base_prompt
+            history[0]["content"] = base_prompt
 
-        # Handle Internet
-        final_prompt = prompt
+        # Search Logic
+        final_prompt = question
+        needs_internet = any(word in question.lower() for word in ['today', 'current', 'news', 'weather', 'latest', 'price of', 'who won', 'search'])
         if use_internet and needs_internet:
             live_data = search_the_web(question)
             if live_data:
-                final_prompt = f"{question}\n\n[SYSTEM]: Use this live info: {live_data}"
+                final_prompt = f"{question}\n\n[SYSTEM]: Live Info: {live_data}"
 
-        chat_history.append({'role': 'user', 'content': final_prompt})
+        history.append({'role': 'user', 'content': final_prompt})
         
-        # Keep history short
-        temp_history = [chat_history[0]] + chat_history[-10:] if len(chat_history) > 11 else chat_history
+        # Prune local history to last 10 messages to save memory
+        if len(history) > 11:
+            history[1:] = history[-10:]
 
         try:
-            client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+            api_key = os.environ.get("GROQ_API_KEY")
+            if not api_key:
+                yield f"data: {json.dumps({'error': 'GROQ_API_KEY missing'})}\n\n"
+                return
+
+            client = Groq(api_key=api_key)
             completion = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=temp_history,
+                messages=history,
                 temperature=0.4,
                 stream=True
             )
 
             full_response = ""
             audio_triggered = False
+            
+            # Ensure static dir exists
+            if not os.path.exists('static'): os.makedirs('static')
 
             for chunk in completion:
                 if chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
                     full_response += content
                     
-                    # Pre-cache first sentence for audio while streaming text
-                    if not audio_triggered and len(full_response) > 80 and any(p in full_response for p in ['. ', '! ', '? ', '\n']):
+                    # Pre-cache Audio (Thread Safe)
+                    if not audio_triggered and len(full_response) > 100 and any(p in full_response for p in ['. ', '! ', '? ', '\n']):
                         audio_triggered = True
-                        threading.Thread(target=text_to_audio, args=(full_response, voice)).start()
+                        temp_filename = f"audio_{uuid.uuid4().hex}.mp3"
+                        temp_path = os.path.join("static", temp_filename)
+                        threading.Thread(target=text_to_audio, args=(full_response, voice, temp_path)).start()
                     
                     yield f"data: {json.dumps({'content': content})}\n\n"
 
-            # Save full assistant response
-            chat_history[-1]['content'] = question 
-            chat_history.append({'role': 'assistant', 'content': full_response})
-            save_memory()
-
-            # Final audio URL
-            filename = text_to_audio(full_response, voice)
-            yield f"data: {json.dumps({'audio': f'/static/{filename}'})}\n\n"
+            # Final Cleanup
+            history[-1]['content'] = question # Store clean question
+            history.append({'role': 'assistant', 'content': full_response})
+            
+            # Final Full Audio
+            final_filename = f"audio_{uuid.uuid4().hex}.mp3"
+            final_path = os.path.join("static", final_filename)
+            text_to_audio(full_response, voice, final_path) # Direct call for final
+            
+            yield f"data: {json.dumps({'audio': f'/static/{final_filename}'})}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"

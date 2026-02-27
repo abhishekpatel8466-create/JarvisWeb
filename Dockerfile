@@ -1,26 +1,25 @@
 FROM python:3.10-slim
 
-# Install system utilities needed for Ollama
-RUN apt-get update && apt-get install -y curl wget ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install system utilities (minimal)
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama (binary) – works on CPU only
-RUN curl -fsSL https://ollama.com/install.sh | sh
+WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt /app/requirements.txt
-WORKDIR /app
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code (app.py, static/, templates/, etc.)
-COPY . /app
+# Copy source code
+COPY . .
 
-# Bake the model into the image:
-# Start the server in background, wait, then pull and create custom model
-RUN nohup bash -c "ollama serve &" && \
-    sleep 5 && \
-    ollama pull gemma2:2b-q4_k_m && \
-    ollama create JarvisTeacher -f /app/IIT_Professor.Modelfile
+# Set environment variables for Flask
+ENV FLASK_APP=app.py
+ENV PORT=10000
 
-# Make the start script executable and set entrypoint
-RUN chmod +x start.sh
-ENTRYPOINT ["./start.sh"]
+# Expose the default Render port
+EXPOSE 10000
+
+# Start the application
+CMD ["python", "app.py"]

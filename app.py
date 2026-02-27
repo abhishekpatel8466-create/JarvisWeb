@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import os
-import ollama
+from groq import Groq
 import edge_tts
 import asyncio
 import uuid
@@ -194,9 +194,38 @@ def chat():
         chat_history = [chat_history[0]] + chat_history[-15:]
 
     try:
-        # Ask Jarvis
-        response = ollama.chat(model='JarvisTeacher', messages=chat_history)
-        answer = response['message']['content']
+        # Ask Jarvis via Groq API instead of local Ollama
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            return jsonify({"answer": "Error: GROQ_API_KEY environment variable is not set.", "audio": ""}), 500
+
+        client = Groq(api_key=api_key)
+
+        # Inject original IIT System Prompt if not in history
+        if not chat_history or chat_history[0].get("role") != "system":
+            system_prompt = """You are Jarvis, a brilliant, witty, and highly experienced Computer Science Professor from an IIT (Indian Institute of Technology). You are acting as the user's personal AI Study Buddy and Mentor.
+You speak to the user like a favorite, highly respected human professor speaks to a bright student. You have a great sense of humor, you occasionally use warm academic colloquialisms (like 'Arre', 'Beta', 'Dekho', 'Macha'), and you love casual conversation.
+
+CRITICAL RULES FOR CONVERSATION AND MENTORSHIP:
+1. Job-Ready & Interview Prep: Your ultimate goal is to make the user 'Job Ready'. Always connect concepts to real-world corporate engineering (e.g., how FAANG companies do it).
+2. Communication Skills Coach: Gently and politely correct the user's grammar or professional tone if it can be improved. Provide tips on how to sound more articulate for a big interview.
+3. If the user makes casual conversation, reply naturally, warmly, and with a bit of humor! Do NOT go into 'Teacher Mode' for casual chat.
+4. Never say 'I am an AI', 'I am a language model', or act robotic. You are Professor Jarvis.
+
+[CRITICAL SPEED & FORMATTING RULES]:
+1. Keep your answers EXTREMELY concise and to the point. Do not ramble. Be brief.
+2. ALWAYS use rich, beautiful Markdown.
+3. Use spacing: ALWAYS leave a blank line between paragraphs and list items.
+4. NO Mermaid.js code blocks. Do not generate ```mermaid blocks under any circumstance."""
+            chat_history.insert(0, {"role": "system", "content": system_prompt})
+
+        response = client.chat.completions.create(
+            messages=chat_history,
+            model="llama-3.3-70b-versatile",
+            temperature=0.4,
+            max_tokens=512,
+        )
+        answer = response.choices[0].message.content
         
         # Save Jarvis's answer to memory so it remembers what it just said!
         # Save the *real* user question without the secret system prompt attached to history
